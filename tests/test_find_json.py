@@ -1,6 +1,11 @@
-from find_in_json import find_in_json
+from find_in_json import ANY_VALUE, get_by_path, path_to_str, set_by_path, str_to_path
+from find_in_json import find_in_json as _find_in_json
 
 # from find_in_json import find_in_json, get_from_json
+
+
+def find_in_json(json: object, key: "str | int | None" = None, value: object = ANY_VALUE) -> list[str]:
+    return [path_to_str(path) for path in _find_in_json(json, key=key, value=value)]
 
 
 def test_find_in_json() -> None:
@@ -51,4 +56,24 @@ def test_find_in_json_numeric_key() -> None:
     matches = find_in_json(json_data, key=1)
     assert len(matches) == 1
     assert matches[0] == "b.[1]"
-    # assert get_from_json(json_data, "b.[1]") == {"4": "value4"}
+    assert get_by_path(json_data, str_to_path("b.[1]")) == {"4": "value4"}
+
+
+def test_get_and_set_by_path() -> None:
+    json_data = {"a": {"b": {"c": "value1", "d": "value2"}, "e": "value3"}, "f": [{"g": "value4"}, {"h": "value5"}]}
+
+    value = get_by_path(json_data, str_to_path("a.b.c"))
+    assert value == "value1"
+
+    value = get_by_path(json_data, str_to_path("f.[1].h"))
+    assert value == "value5"
+
+    value = get_by_path(json_data, str_to_path("nonexistent.path"), default="default_value")
+    assert value == "default_value"
+
+    value = get_by_path(json_data, str_to_path("nonexistent.path"), raise_error=False)
+    assert value is None
+
+    success = set_by_path(json_data, str_to_path("a.b.c"), "new_value1")
+    assert success
+    assert get_by_path(json_data, str_to_path("a.b.c")) == "new_value1"

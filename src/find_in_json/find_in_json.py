@@ -19,28 +19,113 @@ else:
     TypeAlias = str  # type: ignore[assignment]
 
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __author__ = "Marcin Konowalczyk"
 
-
+__all__ = [
+    "ANY_VALUE",
+    "Path",
+    "find_in_json",
+    "get_by_path",
+    "path_to_str",
+    "set_by_path",
+    "str_to_path",
+]
 __changelog__ = [
+    ("0.2.0", "added get and set + changed path to list[str|int]", "@lczyk"),
     ("0.1.0", "initial version", "@lczyk"),
 ]
 
+_missing = object()
 _any = object()
 ANY_VALUE = _any
 
+Path: TypeAlias = "list[str | int]"
 
-def find_in_json(json: object, *, key: str | int | None = None, value: Any = _any) -> list[str]:
+
+def find_in_json(
+    json: object,
+    *,
+    key: str | int | None = None,
+    value: Any = _any,
+) -> list[Path]:
     """Find all instances in a JSON object (dict or list) matching the given key and/or value.
-    Returns a list of "paths" to the matching elements, where each path is a dot-separated
-    string of keys and indices. If no matches are found, returns an empty list. If no key
+    Returns a list of "paths" to the matching elements, where each path is a list of keys and/or
+    indices. If no matches are found, returns an empty list. If no key
     and no value is specified, returns the list of all paths in the JSON object."""
+    if key is None and value is _any:
+        matcher = lambda k, v: True  # noqa: E731
+    elif key is None and value is not _any:
+        matcher = lambda k, v: v == value  # noqa: E731
+    elif key is not None and value is _any:
+        matcher = lambda k, v: k == key  # noqa: E731
+    else:
+        matcher = lambda k, v: k == key and v == value  # noqa: E731
 
-    matches = _find_in_json(json, _make_matcher(key, value), None, None)
-    _matches = [[f"[{s}]" if isinstance(s, int) else s for s in m] for m in matches]
-    return [".".join(m) for m in _matches]
+    return _find_in_json(json, matcher, None, None)
+
+
+def path_to_str(path: Path) -> str:
+    """Convert a path (list of keys and indices) to a dot-separated string representation."""
+    parts: list[str] = [f"[{p}]" if isinstance(p, int) else str(p) for p in path]
+    return ".".join(parts)
+
+
+def str_to_path(path: str) -> Path:
+    """Convert a dot-separated string representation of a path to a list of keys and indices."""
+    parts = path.split(".")
+    result: Path = []
+    for part in parts:
+        if part.startswith("[") and part.endswith("]"):
+            index_str = part[1:-1]
+            result.append(int(index_str))
+        else:
+            result.append(part)
+    return result
+
+
+def get_by_path(
+    data: object,
+    path: Path,
+    *,
+    default: object = _missing,
+    wrap_index: bool = True,
+    raise_error: bool = True,
+) -> object:
+    """Get the value from a JSON object (dict or list) by the given path.
+    If the path is invalid, returns an error message
+    and a missing value object. If the path is valid, returns an empty error message and the value.
+    If wrap is True, negative indices and indices greater than the length of the list are wrapped around."""
+    msg, value = _get_by_path(data, path, wrap_index)
+    if msg:
+        if default is not _missing:
+            return default
+        elif raise_error:
+            raise KeyError(msg)
+        else:
+            # NOTE: this is a bit hairy, since None is a valid value, but i guess if someone
+            #       does not set the default and sets raise_error to False, they know what they are doing
+            return None
+    return value
+
+
+def set_by_path(
+    data: object,
+    path: Path,
+    value: object,
+    *,
+    wrap_index: bool = True,
+    raise_error: bool = True,
+) -> bool:
+    """Set the value in a JSON object (dict or list) by the given path.
+    If the path is invalid, returns an error message. If the path is valid, sets the value and returns True.
+    """
+
+    msg = _set_by_path(data, path, value, wrap_index)
+    if msg and raise_error:
+        raise KeyError(msg)
+    return msg == ""
 
 
 ### Internal ###########################################################################################################
@@ -48,17 +133,6 @@ def find_in_json(json: object, *, key: str | int | None = None, value: Any = _an
 
 _Stack: TypeAlias = "list[str | int]"
 _Matcher: TypeAlias = Callable[["str | int", Any], bool]
-
-
-def _make_matcher(key: str | int | None, value: Any) -> _Matcher:
-    if key is None and value is _any:
-        return lambda k, v: True
-    elif key is None and value is not _any:
-        return lambda k, v: v == value
-    elif key is not None and value is _any:
-        return lambda k, v: k == key
-    else:
-        return lambda k, v: k == key and v == value
 
 
 def _find_in_json(
@@ -89,6 +163,80 @@ def _find_in_json(
         pass
 
     return matches
+
+
+def _wrap_index(index: int, N: int) -> int:
+    # wrap around once
+    if index < 0:
+        index += N
+    elif index >= N:
+        index -= N
+    return index
+
+
+def _get_by_path(data: object, path: Path, wrap: bool = True) -> tuple[str, object]:
+    current = data
+    for part in path:
+        if isinstance(current, dict):
+            if not isinstance(part, str):
+                return f"Invalid path. Expected string key for dict, got {part!r}", _missing
+            value = current.get(part, _missing)
+            if value is _missing:
+                return f"Key not found: {part!r}", _missing
+            current = value
+        elif isinstance(current, list):
+            if not isinstance(part, int):
+                return f"Invalid path. Expected integer index for list, got {part!r}", _missing
+            index = _wrap_index(part, len(current)) if wrap else part
+            if index < 0 or index >= len(current):
+                return f"Index out of range: {index}", _missing
+            current = current[index]
+        else:
+            return f"Invalid path. Expected dict or list, got {current!r}", _missing
+    return "", current
+
+
+def _set_by_path(data: object, path: Path, value: object, wrap: bool = True) -> str:
+    current = data
+    for i, part in enumerate(path):
+        if i == len(path) - 1:
+            # last part, set the value
+            if isinstance(current, dict):
+                if not isinstance(part, str):
+                    return f"Invalid path. Expected string key for dict, got {part!r}"
+                current[part] = value
+                return ""
+            elif isinstance(current, list):
+                if not isinstance(part, int):
+                    return f"Invalid path. Expected integer index for list, got {part!r}"
+                index = _wrap_index(part, len(current)) if wrap else part
+                if index < 0 or index >= len(current):
+                    return f"Index out of range: {index}"
+                current[index] = value
+                return ""
+            else:
+                return f"Invalid path. Expected dict or list, got {current!r}"
+        # traverse the path
+        elif isinstance(current, dict):
+            if not isinstance(part, str):
+                return f"Invalid path. Expected string key for dict, got {part!r}"
+            if part not in current or not isinstance(current[part], (dict, list)):
+                # create a new dict if the key does not exist or is not a dict/list
+                current[part] = {}
+            current = current[part]
+        elif isinstance(current, list):
+            if not isinstance(part, int):
+                return f"Invalid path. Expected integer index for list, got {part!r}"
+            index = _wrap_index(part, len(current)) if wrap else part
+            if index < 0 or index >= len(current):
+                return f"Index out of range: {index}"
+            if not isinstance(current[index], (dict, list)):
+                # create a new dict if the element is not a dict/list
+                current[index] = {}
+            current = current[index]
+        else:
+            return f"Invalid path. Expected dict or list, got {current!r}"
+    return ""
 
 
 __license__ = """
