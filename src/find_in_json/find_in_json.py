@@ -11,7 +11,7 @@ and no value is specified, returns the list of all paths in the JSON object.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from typing_extensions import TypeAlias
@@ -19,12 +19,12 @@ else:
     TypeAlias = str  # type: ignore[assignment]
 
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __author__ = "Marcin Konowalczyk"
 
 __all__ = [
-    "ANY_VALUE",
+    "ANY",
     "Path",
     "find_in_json",
     "get_by_path",
@@ -33,13 +33,14 @@ __all__ = [
     "str_to_path",
 ]
 __changelog__ = [
+    ("0.3.0", "removed Any import and changed ANY_VALUE to ANY", "@lczyk"),
     ("0.2.0", "added get and set + changed path to list[str|int]", "@lczyk"),
     ("0.1.0", "initial version", "@lczyk"),
 ]
 
 _missing = object()
 _any = object()
-ANY_VALUE = _any
+ANY = _any
 
 Path: TypeAlias = "list[str | int]"
 
@@ -48,12 +49,13 @@ def find_in_json(
     json: object,
     *,
     key: str | int | None = None,
-    value: Any = _any,
+    value: object = _any,
 ) -> list[Path]:
     """Find all instances in a JSON object (dict or list) matching the given key and/or value.
     Returns a list of "paths" to the matching elements, where each path is a list of keys and/or
     indices. If no matches are found, returns an empty list. If no key
     and no value is specified, returns the list of all paths in the JSON object."""
+    key = None if key is ANY else key  # should not happen, but let's not break
     if key is None and value is _any:
         matcher = lambda k, v: True  # noqa: E731
     elif key is None and value is not _any:
@@ -132,11 +134,11 @@ def set_by_path(
 
 
 _Stack: TypeAlias = "list[str | int]"
-_Matcher: TypeAlias = Callable[["str | int", Any], bool]
+_Matcher: TypeAlias = Callable[["str | int", object], bool]
 
 
 def _find_in_json(
-    json: Any,
+    json: object,
     matcher_fun: _Matcher,
     _matches: list[_Stack] | None,
     _stack: _Stack | None,
@@ -174,8 +176,8 @@ def _wrap_index(index: int, N: int) -> int:
     return index
 
 
-def _get_by_path(data: object, path: Path, wrap: bool = True) -> tuple[str, object]:
-    current = data
+def _get_by_path(json: object, path: Path, wrap: bool = True) -> tuple[str, object]:
+    current = json
     for part in path:
         if isinstance(current, dict):
             if not isinstance(part, str):
@@ -196,8 +198,8 @@ def _get_by_path(data: object, path: Path, wrap: bool = True) -> tuple[str, obje
     return "", current
 
 
-def _set_by_path(data: object, path: Path, value: object, wrap: bool = True) -> str:
-    current = data
+def _set_by_path(json: object, path: Path, value: object, wrap: bool = True) -> str:
+    current = json
     for i, part in enumerate(path):
         if i == len(path) - 1:
             # last part, set the value

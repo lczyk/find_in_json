@@ -1,5 +1,5 @@
 from .find_in_json import (
-    ANY_VALUE,  # noqa: F401
+    ANY,  # noqa: F401
     Path,  # noqa: F401
     __author__,  # noqa: F401
     __doc__,  # noqa: F401

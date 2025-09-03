@@ -1,11 +1,9 @@
-from find_in_json import ANY_VALUE, get_by_path, path_to_str, set_by_path, str_to_path
+from find_in_json import ANY, get_by_path, path_to_str, set_by_path, str_to_path
 from find_in_json import find_in_json as _find_in_json
 
-# from find_in_json import find_in_json, get_from_json
 
-
-def find_in_json(json: object, key: "str | int | None" = None, value: object = ANY_VALUE) -> list[str]:
-    return [path_to_str(path) for path in _find_in_json(json, key=key, value=value)]
+def find_in_json(json: object, key: object = ANY, value: object = ANY) -> list[str]:
+    return [path_to_str(path) for path in _find_in_json(json, key=key, value=value)]  # type: ignore
 
 
 def test_find_in_json() -> None:
